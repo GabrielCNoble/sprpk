@@ -37,6 +37,8 @@ int main(int argc, char *argv[])
     char *path;
     char *input_path;
     DIR *dir;
+    struct header_t *header;
+    struct entry_t *ent;
 //    DIR *probe;
     struct dirent *entry;
     if(argc > 1)

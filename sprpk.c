@@ -8,6 +8,7 @@
 #include "stb/stb_image.h"
 #include "stb/stb_image_write.h"
 #include "dstuff/file/path.h"
+#include "dstuff/file/file.h"
 
 #define MAX(a, b) (a>b?a:b)
 #define MIN(a, b) (a<b?a:b)
@@ -153,7 +154,7 @@ void fit_image(struct input_image_t *image, struct sprite_sheet_t *sprite_sheet)
     new_region->image = NULL;
     if(new_region->frame.width && new_region->frame.height)
     {
-        /* if this region has area greater than , create it */
+        /* if this region has area greater than 0, create it */
         sprite_sheet->free_region_count++;
     }
 
@@ -197,19 +198,20 @@ void build_entries(struct sprite_sheet_t *sprite_sheet)
 {
     char *entries_memory;
     uint32_t entries_memory_size;
-    struct sprpk_header_t *header;
+    struct header_t *header;
     struct entry_t *entry;
 //    struct frame_t *frame;
     struct region_t *region;
     int32_t frame_index;
     char *entry_name;
     qsort(sprite_sheet->used_regions, sprite_sheet->used_region_count, sizeof(struct region_t), compare_image_names);
-    entries_memory_size = sizeof(struct sprpk_header_t) +
+    entries_memory_size = sizeof(struct header_t) +
                     (sizeof(struct entry_t) + sizeof(struct frame_t)) * sprite_sheet->used_region_count;
+
     entries_memory = calloc(1, entries_memory_size);
-    header = (struct sprpk_header_t *)entries_memory;
-    entries_memory += sizeof(struct sprpk_header_t);
-    strcpy(header->tag, sprpk_header_tag);
+    header = (struct header_t *)entries_memory;
+    entries_memory += sizeof(struct header_t);
+    strcpy(header->tag, header_tag);
 
     entry_name = strip_decorations_from_path(strip_path_from_file_name(sprite_sheet->used_regions[0].image->file_name));
     for(uint32_t region_index = 0; region_index < sprite_sheet->used_region_count;)
@@ -333,3 +335,40 @@ void write_sprite_sheet(char *output_name, struct sprite_sheet_t *sprite_sheet, 
     stbi_write_png_to_func(write_sprite_sheet_pixels, file, sprite_sheet->width, sprite_sheet->height, 4, output_pixels, output_row_pitch);
     fclose(file);
 }
+
+void read_sprpk(char *file_name, struct header_t **header)
+{
+    struct header_t *header_ptr;
+    long header_size;
+    FILE *file;
+
+    *header = NULL;
+    file = fopen(file_name, "rb");
+    if(file)
+    {
+        read_file(file, (void **)&header_ptr, &header_size);
+        if(!strcmp(header_ptr->tag, header_tag))
+        {
+            *header = header_ptr;
+        }
+    }
+}
+
+void get_sprpk_entry(struct header_t *header, struct entry_t **entry, uint32_t entry_index)
+{
+    struct entry_t *entry_ptr;
+    *entry = NULL;
+    if(entry_index < header->entry_count)
+    {
+        entry_ptr = (struct entry_t *)((char *)header + sizeof(struct header_t));
+        for(uint32_t current_entry_index = 0; current_entry_index < entry_index; current_entry_index++)
+        {
+            entry_ptr = (struct entry_t *)((char *)entry_ptr + sizeof(struct entry_t) +
+                sizeof(struct frame_t) * (entry_ptr->frame_count - 1));
+        }
+        *entry = entry_ptr;
+    }
+}
+
+
+

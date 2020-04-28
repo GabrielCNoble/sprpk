@@ -4,3 +4,5 @@
 #include "stb/stb_image_write.h"
 #define DSTUFF_FILE_PATH_IMPLEMENTATION
 #include "dstuff/file/path.h"
+#define DSTUFF_FILE_FILE_IMPLEMENTATION
+#include "dstuff/file/file.h"
