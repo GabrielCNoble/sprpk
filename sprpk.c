@@ -5,38 +5,38 @@
 #include <math.h>
 #include <dirent.h>
 #include "sprpk.h"
-#include "../stb/stb_image.h"
-#include "../stb/stb_image_write.h"
-#include "../dstuff/file/path.h"
+#include "stb/stb_image.h"
+#include "stb/stb_image_write.h"
+#include "dstuff/file/path.h"
 
 #define MAX(a, b) (a>b?a:b)
 #define MIN(a, b) (a<b?a:b)
 #define CLAMP(min, value, max) MIN(max, MAX(value, min))
 #define RATIO(a, b) (a>=b?(float)b/(float)a:(float)a/(float)b)
 
-int compare_images(struct input_image_t *a, struct input_image_t *b)
+int compare_image_names(const void *a, const void *b)
 {
-    uint32_t a_pixels = a->width * a->height;
-    uint32_t b_pixels = b->width * b->height;
+    struct region_t *region_a = (struct region_t *)a;
+    struct region_t *region_b = (struct region_t *)b;
+    static char image_a_filename[PATH_MAX];
+    static char image_b_filename[PATH_MAX];
+    int32_t image_a_index;
+    int32_t image_b_index;
+    int32_t compare;
 
-    return b_pixels - a_pixels;
-//    if(a_pixels > b_pixels)
-//    {
-//        return -1;
-//    }
-//    else if(a_pixels == b_pixels)
-//    {
-//        if(a->width > b->width)
-//        {
-//            return -1;
-//        }
-//        else
-//        {
-//            return 0;
-//        }
-//    }
-//
-//    return 1;
+    image_a_index = get_index_from_path(region_a->image->file_name);
+    image_b_index = get_index_from_path(region_b->image->file_name);
+
+    strcpy(image_a_filename, strip_decorations_from_path(region_a->image->file_name));
+    strcpy(image_b_filename, strip_decorations_from_path(region_b->image->file_name));
+
+    compare = strcmp(image_a_filename, image_b_filename);
+    if(!compare && image_a_index >= 0 && image_b_index >= 0)
+    {
+        return image_b_index - image_a_index;
+    }
+
+    return compare;
 }
 
 void fit_image(struct input_image_t *image, struct sprite_sheet_t *sprite_sheet)
@@ -72,11 +72,11 @@ void fit_image(struct input_image_t *image, struct sprite_sheet_t *sprite_sheet)
             that increases the size of the current sprite sheet gets fit */
             region = sprite_sheet->free_regions + region_index;
 
-            if(region->width >= image->width && region->height >= image->height)
+            if(region->frame.width >= image->width && region->frame.height >= image->height)
             {
-                new_width = region->offset_x + image->width;
+                new_width = region->frame.offset_x + image->width;
                 new_width = MAX(new_width, sprite_sheet->width);
-                new_height = region->offset_y + image->height;
+                new_height = region->frame.offset_y + image->height;
                 new_height = MAX(new_height, sprite_sheet->height);
 
                 pixel_count_increase = new_width * new_height - cur_pixel_count;
@@ -103,13 +103,13 @@ void fit_image(struct input_image_t *image, struct sprite_sheet_t *sprite_sheet)
             {
                 region = sprite_sheet->free_regions + region_index;
 
-                if(region->width >= image->width && region->height >= image->height)
+                if(region->frame.width >= image->width && region->frame.height >= image->height)
                 {
                     /* new size of the sprite sheet if this region were to
                     be used */
-                    new_width = region->offset_x + image->width;
+                    new_width = region->frame.offset_x + image->width;
                     new_width = MAX(new_width, sprite_sheet->width);
-                    new_height = region->offset_y + image->height;
+                    new_height = region->frame.offset_y + image->height;
                     new_height = MAX(new_height, sprite_sheet->height);
 
 
@@ -130,29 +130,41 @@ void fit_image(struct input_image_t *image, struct sprite_sheet_t *sprite_sheet)
     sprite_sheet->used_region_count++;
     memcpy(used_region, new_region, sizeof(struct region_t));
 
-    new_region->offset_x = used_region->offset_x + image->width;
-    new_region->offset_y = used_region->offset_y;
-    new_region->width = used_region->width - image->width;
-    new_region->height = image->height;
+    new_region->frame.offset_x = used_region->frame.offset_x + image->width;
+    new_region->frame.offset_y = used_region->frame.offset_y;
+    new_region->frame.width = used_region->frame.width - image->width;
+    new_region->frame.height = image->height;
     new_region->image = NULL;
+    if(!(new_region->frame.width && new_region->frame.height))
+    {
+        /* if this region has 0 area, don't create it */
+        if(best_fit + 1 < sprite_sheet->free_region_count)
+        {
+            memcpy(new_region, sprite_sheet->free_regions + sprite_sheet->free_region_count - 1, sizeof(struct region_t));
+        }
+        sprite_sheet->free_region_count--;
+    }
 
     new_region = sprite_sheet->free_regions + sprite_sheet->free_region_count;
-    sprite_sheet->free_region_count++;
-
-    new_region->offset_x = used_region->offset_x;
-    new_region->offset_y = used_region->offset_y + image->height;
-    new_region->width = used_region->width;
-    new_region->height = used_region->height - image->height;
+    new_region->frame.offset_x = used_region->frame.offset_x;
+    new_region->frame.offset_y = used_region->frame.offset_y + image->height;
+    new_region->frame.width = used_region->frame.width;
+    new_region->frame.height = used_region->frame.height - image->height;
     new_region->image = NULL;
+    if(new_region->frame.width && new_region->frame.height)
+    {
+        /* if this region has area greater than , create it */
+        sprite_sheet->free_region_count++;
+    }
 
     used_region->image = image;
-    used_region->width = image->width;
-    used_region->height = image->height;
+    used_region->frame.width = image->width;
+    used_region->frame.height = image->height;
 
-    new_width = used_region->width + used_region->offset_x;
-    new_height = used_region->height + used_region->offset_y;
+    new_width = used_region->frame.width + used_region->frame.offset_x;
+    new_height = used_region->frame.height + used_region->frame.offset_y;
 
-    if(new_width> sprite_sheet->width)
+    if(new_width > sprite_sheet->width)
     {
         sprite_sheet->width = new_width;
     }
@@ -172,8 +184,8 @@ void fit_images(struct input_image_t *images, uint32_t image_count, struct sprit
     sprite_sheet->used_region_count = 0;
     sprite_sheet->used_regions = calloc(sizeof(struct region_t), image_count);
 
-    sprite_sheet->free_regions->width = 0xffffffff;
-    sprite_sheet->free_regions->height = 0xffffffff;
+    sprite_sheet->free_regions->frame.width = 0xffffffff;
+    sprite_sheet->free_regions->frame.height = 0xffffffff;
 
     for(uint32_t image_index = 0; image_index < image_count; image_index++)
     {
@@ -181,28 +193,104 @@ void fit_images(struct input_image_t *images, uint32_t image_count, struct sprit
     }
 }
 
-void write_sprite_sheet(char *output_name, struct sprite_sheet_t *sprite_sheet)
+void build_entries(struct sprite_sheet_t *sprite_sheet)
+{
+    char *entries_memory;
+    uint32_t entries_memory_size;
+    struct sprpk_header_t *header;
+    struct entry_t *entry;
+//    struct frame_t *frame;
+    struct region_t *region;
+    int32_t frame_index;
+    char *entry_name;
+    qsort(sprite_sheet->used_regions, sprite_sheet->used_region_count, sizeof(struct region_t), compare_image_names);
+    entries_memory_size = sizeof(struct sprpk_header_t) +
+                    (sizeof(struct entry_t) + sizeof(struct frame_t)) * sprite_sheet->used_region_count;
+    entries_memory = calloc(1, entries_memory_size);
+    header = (struct sprpk_header_t *)entries_memory;
+    entries_memory += sizeof(struct sprpk_header_t);
+    strcpy(header->tag, sprpk_header_tag);
+
+    entry_name = strip_decorations_from_path(strip_path_from_file_name(sprite_sheet->used_regions[0].image->file_name));
+    for(uint32_t region_index = 0; region_index < sprite_sheet->used_region_count;)
+    {
+        region = sprite_sheet->used_regions + region_index;
+
+        entry = (struct entry_t *)entries_memory;
+        entries_memory += sizeof(struct entry_t);
+        header->entry_count++;
+
+        strcpy(entry->name, entry_name);
+        frame_index = get_index_from_path(region->image->file_name);
+        if(frame_index < 0)
+        {
+            /* this image has no index in its name,
+            so it'll be alone in this entry */
+            entry->frames[0] = region->frame;
+            header->frame_count++;
+            if(region_index + 1 < sprite_sheet->used_region_count)
+            {
+                entry_name = strip_decorations_from_path(strip_path_from_file_name(region[1].image->file_name));
+            }
+            continue;
+        }
+        else
+        {
+            entry->frame_count = frame_index + 1;
+            header->frame_count += entry->frame_count;
+            while(region_index < sprite_sheet->used_region_count)
+            {
+                region = sprite_sheet->used_regions + region_index;
+                frame_index = get_index_from_path(region->image->file_name);
+                entry_name = strip_decorations_from_path(strip_path_from_file_name(region->image->file_name));
+                if(strcmp(entry->name, entry_name))
+                {
+                    break;
+                }
+                entry->frames[frame_index] = region->frame;
+                region_index++;
+            }
+
+            /* struct entry_t already contains a struct frame_t itself, so we subtract
+            one away here to not waste space */
+            entries_memory += sizeof(struct frame_t) * (entry->frame_count - 1);
+        }
+    }
+
+    header->data_offset = entries_memory - (char *)header;
+    sprite_sheet->header = header;
+    sprite_sheet->header_size = header->data_offset;
+}
+
+void write_sprite_sheet_pixels(void *context, void *data, int size)
+{
+    FILE *file = (FILE *)context;
+    fwrite(data, 1, size, file);
+}
+
+void write_sprite_sheet(char *output_name, struct sprite_sheet_t *sprite_sheet, uint32_t color_free_regions)
 {
     uint32_t output_row_pitch;
     struct region_t *region;
-    char *output_pixels;
+    uint32_t *output_pixels;
+    FILE *file;
 
-    output_row_pitch = sprite_sheet->width * 4;
+    output_row_pitch = sprite_sheet->width * STBI_rgb_alpha;
     output_pixels = calloc(sprite_sheet->height, output_row_pitch);
 
     for(uint32_t region_index = 0; region_index < sprite_sheet->used_region_count; region_index++)
     {
         region = sprite_sheet->used_regions + region_index;
 
-        uint32_t width;
-        uint32_t height;
-        uint32_t comps;
-        char *pixels = stbi_load(region->image->file_name, &width, &height, &comps, STBI_rgb_alpha);
+        int width;
+        int height;
+        int comps;
+        unsigned char *pixels = stbi_load(region->image->file_name, &width, &height, &comps, STBI_rgb_alpha);
         uint32_t row_pitch = width * STBI_rgb_alpha;
 
-        for(uint32_t y = 0; y < region->height; y++)
+        for(uint32_t y = 0; y < region->frame.height; y++)
         {
-            uint32_t output_pixel_offset = (region->offset_y + y) * output_row_pitch + region->offset_x * STBI_rgb_alpha;
+            uint32_t output_pixel_offset = (region->frame.offset_y + y) * sprite_sheet->width + region->frame.offset_x;
             uint32_t pixel_offset = y * width * STBI_rgb_alpha;
             memcpy(output_pixels + output_pixel_offset, pixels + pixel_offset, row_pitch);
         }
@@ -210,114 +298,38 @@ void write_sprite_sheet(char *output_name, struct sprite_sheet_t *sprite_sheet)
         free(pixels);
     }
 
-    stbi_write_png(output_name, sprite_sheet->width, sprite_sheet->height, 4, output_pixels, output_row_pitch);
-}
-
-int main(int argc, char *argv[])
-{
-    uint32_t arg_index = 1;
-    struct input_image_t *images = NULL;
-    struct input_image_t *image;
-    struct sprite_sheet_t sprite_sheet;
-    uint32_t image_count = 0;
-    char *output_name = "output.sprpk";
-    uint32_t width;
-    uint32_t height;
-    uint32_t comp;
-//    char path[512];
-    char *path;
-    char *input_path;
-    DIR *dir;
-    DIR *probe;
-    struct dirent *entry;
-    if(argc > 1)
+    if(color_free_regions)
     {
-        while(arg_index < argc)
+        for(uint32_t region_index = 0; region_index < sprite_sheet->free_region_count; region_index++)
         {
-            if(!strcmp(argv[arg_index], "-f"))
+            region = sprite_sheet->free_regions + region_index;
+
+            if(region->frame.offset_y + region->frame.height > sprite_sheet->height)
             {
-                arg_index++;
-
-                if(arg_index == argc)
-                {
-                    printf("error: expecting file name after '-f'\n");
-                    return 0;
-                }
-
-                images = realloc(images, sizeof(struct input_image_t) * (image_count + 1));
-                image = images + image_count;
-                image->file_name = argv[arg_index];
-                if(!stbi_info(image->file_name, &width, &height, &comp))
-                {
-                    printf("error: couldn't open file '%s'\n", image->file_name);
-                    return 0;
-                }
-                image->width = (uint32_t)width;
-                image->height = (uint32_t)height;
-                arg_index++;
-                image_count++;
+                region->frame.height = sprite_sheet->height - region->frame.offset_y;
             }
-            else if(!strcmp(argv[arg_index], "-d"))
-            {
-                arg_index++;
-                input_path = argv[arg_index];
-                arg_index++;
-                dir = opendir(input_path);
 
-                while(entry = readdir(dir))
+            if(region->frame.offset_x + region->frame.width > sprite_sheet->width)
+            {
+                region->frame.width = sprite_sheet->width - region->frame.offset_x;
+            }
+
+            uint32_t pixel_color = ((0xffffffff * rand()) + region_index) | 0xff000000;
+            for(uint32_t y = 0; y < region->frame.height; y++)
+            {
+                uint32_t output_pixel_offset = (region->frame.offset_y + y) * sprite_sheet->width + region->frame.offset_x;
+//                uint32_t row_pitch = region->frame.width;
+
+                for(uint32_t x = 0; x < region->frame.width; x++)
                 {
-                    path = append_path_segment(input_path, entry->d_name);
-                    if(!is_dir(path))
-                    {
-                        images = realloc(images, sizeof(struct input_image_t) * (image_count + 1));
-                        image = images + image_count;
-                        image->file_name = strdup(path);
-                        if(!stbi_info(image->file_name, &width, &height, &comp))
-                        {
-                            printf("error: couldn't open file '%s'\n", image->file_name);
-                            return 0;
-                        }
-                        image->width = (uint32_t)width;
-                        image->height = (uint32_t)height;
-                        image_count++;
-                    }
+                    *(output_pixels + output_pixel_offset + x) = pixel_color;
                 }
             }
-            else if(!strcmp(argv[arg_index], "-o"))
-            {
-                arg_index++;
-                if(arg_index == argc)
-                {
-                    printf("error: expecting output name after '-o'\n");
-                    return 0;
-                }
-                output_name = argv[arg_index];
-                arg_index++;
-            }
-            else if(!strcmp(argv[arg_index], "-h"))
-            {
-                return 0;
-            }
-            else
-            {
-                printf("error: unknown option '%s'\n", argv[arg_index]);
-                return 0;
-            }
-        }
-
-        if(images)
-        {
-            printf("sorting...\n");
-            qsort(images, image_count, sizeof(struct input_image_t), compare_images);
-            printf("fitting...\n");
-            fit_images(images, image_count, &sprite_sheet);
-            printf("outputting...\n");
-            write_sprite_sheet(output_name, &sprite_sheet);
-            printf("done");
-            return 0;
         }
     }
 
-    printf("error: no input given\n");
-    return 0;
+    file = fopen(output_name, "wb");
+    fwrite(sprite_sheet->header, 1, sprite_sheet->header_size, file);
+    stbi_write_png_to_func(write_sprite_sheet_pixels, file, sprite_sheet->width, sprite_sheet->height, 4, output_pixels, output_row_pitch);
+    fclose(file);
 }
